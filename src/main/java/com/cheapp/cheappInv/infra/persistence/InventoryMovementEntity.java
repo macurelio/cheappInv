@@ -7,7 +7,8 @@ import java.time.Instant;
 
 @Entity
 @Table(name = "inventory_movements", indexes = {
-		@Index(name = "idx_movements_product_ts", columnList = "product_id,created_at")
+		@Index(name = "idx_movements_product_ts", columnList = "product_id,created_at"),
+		@Index(name = "idx_movements_product_wh_type_ts", columnList = "product_id,warehouse_id,type,created_at")
 })
 public class InventoryMovementEntity {
 	@Id
@@ -70,5 +71,21 @@ public class InventoryMovementEntity {
 
 	public Long getId() {
 		return id;
+	}
+
+	public ProductEntity getProduct() {
+		return product;
+	}
+
+	public String getWarehouseId() {
+		return warehouseId;
+	}
+
+	public MovementType getType() {
+		return type;
+	}
+
+	public Instant getCreatedAt() {
+		return createdAt;
 	}
 }

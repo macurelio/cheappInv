@@ -31,6 +31,30 @@ Configuración principal en `src/main/resources/application.yaml`:
   - `inventory.outbox.batch-size` (default `50`)
 - `inventory.default-warehouse-id` (default `MAIN`)
 
+### Base de datos: ¿es necesaria?
+
+Sí. Este microservicio persiste **productos**, **stock**, **movimientos**, **inbox** y **outbox** usando **Spring Data JPA**.
+
+- En desarrollo, está configurado para usar **H2 en memoria** (por defecto), por eso “funciona sin instalar nada”.
+- Para un entorno persistente (dev compartido / staging / producción) se recomienda **PostgreSQL**.
+
+#### Script PostgreSQL (DBeaver)
+
+En el repo tienes un script listo para ejecutar en PostgreSQL:
+
+- `db/postgres/init.sql`
+
+Crea las tablas: `products`, `stock`, `inventory_movements`, `inbox_events`, `outbox_events` con sus índices/constraints.
+
+#### Configuración rápida para usar PostgreSQL (ejemplo)
+
+Ejemplo de properties (puedes ponerlo en un `application-postgres.yaml` o variables de entorno):
+
+- `spring.datasource.url=jdbc:postgresql://localhost:5432/cheappinv`
+- `spring.datasource.username=cheappinv_user`
+- `spring.datasource.password=cheappinv_pass`
+- `spring.jpa.hibernate.ddl-auto=validate` (recomendado en prod)
+
 ## 3) Modelo de dominio (conceptos)
 
 ### Producto
