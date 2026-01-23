@@ -1,0 +1,173 @@
+openapi: 3.1.0
+info:
+  title: OpenAPI definition
+  version: v0
+servers:
+- url: http://localhost:9090
+  description: Generated server url
+paths:
+  /api/products/{sku}/reactivate:
+    post:
+      tags:
+      - inventory-controller
+      operationId: reactivate
+      parameters:
+      - name: sku
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: correlationId
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: reason
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+  /api/products/{sku}/block:
+    post:
+      tags:
+      - inventory-controller
+      operationId: block
+      parameters:
+      - name: sku
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: correlationId
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: reason
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+  /api/events/in/pedido-proveedor-recibido:
+    post:
+      tags:
+      - events-in-controller
+      operationId: pedidoProveedorRecibido
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PedidoProveedorRecibidoEvent"
+        required: true
+      responses:
+        "202":
+          description: Accepted
+  /api/events/in/item-agregado:
+    post:
+      tags:
+      - events-in-controller
+      operationId: itemAgregado
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ItemAgregadoEvent"
+        required: true
+      responses:
+        "202":
+          description: Accepted
+  /api/stock:
+    get:
+      tags:
+      - inventory-controller
+      operationId: getStock
+      parameters:
+      - name: sku
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: warehouseId
+        in: query
+        required: false
+        schema:
+          type: string
+          default: MAIN
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/StockView"
+  /api/products/{sku}:
+    get:
+      tags:
+      - inventory-controller
+      operationId: getProduct
+      parameters:
+      - name: sku
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ProductView"
+components:
+  schemas:
+    PedidoProveedorRecibidoEvent:
+      type: object
+      properties:
+        eventId:
+          type: string
+        correlationId:
+          type: string
+        sku:
+          type: string
+        quantity:
+          type: integer
+          format: int64
+        warehouseId:
+          type: string
+    ItemAgregadoEvent:
+      type: object
+      properties:
+        eventId:
+          type: string
+        correlationId:
+          type: string
+        sku:
+          type: string
+        quantity:
+          type: integer
+          format: int64
+        warehouseId:
+          type: string
+    StockView:
+      type: object
+      properties:
+        sku:
+          type: string
+        warehouseId:
+          type: string
+        quantity:
+          type: integer
+          format: int64
+    ProductView:
+      type: object
+      properties:
+        sku:
+          type: string
+        status:
+          type: string

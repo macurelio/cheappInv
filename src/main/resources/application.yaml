@@ -28,3 +28,8 @@ inventory:
     poll-interval: 2s
     batch-size: 50
   default-warehouse-id: MAIN
+
+springdoc:
+  swagger-ui:
+    tryItOutEnabled: true
+    operationsSorter: method
