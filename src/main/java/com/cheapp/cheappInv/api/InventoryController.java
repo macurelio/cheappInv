@@ -3,9 +3,11 @@ package com.cheapp.cheappInv.api;
 import com.cheapp.cheappInv.application.InventoryService;
 import com.cheapp.cheappInv.application.commands.BlockProductCommand;
 import com.cheapp.cheappInv.application.commands.ReactivateProductCommand;
+import com.cheapp.cheappInv.infra.logging.Loggable;
 import com.cheapp.cheappInv.infra.persistence.ProductEntity;
 import com.cheapp.cheappInv.infra.persistence.ProductRepository;
 import com.cheapp.cheappInv.infra.persistence.StockRepository;
+import com.cheapp.cheappInv.domain.ProductNotFoundException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -13,13 +15,17 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.NotBlank;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api")
 @Tag(name = "Inventory", description = "API REST del microservicio de inventario (producto, stock y acciones administrativas).")
+@Loggable("inventory")
 public class InventoryController {
+	private static final Logger log = LoggerFactory.getLogger(InventoryController.class);
 	private final InventoryService inventoryService;
 	private final ProductRepository productRepository;
 	private final StockRepository stockRepository;
@@ -47,6 +53,7 @@ public class InventoryController {
 			@Parameter(description = "Correlation ID para trazabilidad", example = "corr-123") @RequestParam(required = false) String correlationId,
 			@Parameter(description = "Motivo del bloqueo", example = "Producto retirado") @RequestParam(required = false) String reason
 	) {
+		log.info("Bloqueando producto sku={} correlationId={} reason={}", sku, correlationId, reason);
 		inventoryService.bloquearProducto(new BlockProductCommand(correlationId, sku, reason));
 	}
 
@@ -65,24 +72,25 @@ public class InventoryController {
 			@Parameter(description = "Correlation ID para trazabilidad", example = "corr-123") @RequestParam(required = false) String correlationId,
 			@Parameter(description = "Motivo de reactivación", example = "Vuelve a estar disponible") @RequestParam(required = false) String reason
 	) {
+		log.info("Reactivando producto sku={} correlationId={} reason={}", sku, correlationId, reason);
 		inventoryService.reactivarProducto(new ReactivateProductCommand(correlationId, sku, reason));
 	}
 
 	@GetMapping("/products/{sku}")
 	@Operation(
 			summary = "Consultar producto",
-			description = "Devuelve el estado actual del producto. Nota: actualmente, si no existe, la API responde vacío (null).",
+			description = "Devuelve el estado actual del producto.",
 			responses = {
-					@ApiResponse(responseCode = "200", description = "Producto encontrado", content = @Content(schema = @Schema(implementation = ProductView.class)))
+					@ApiResponse(responseCode = "200", description = "Producto encontrado", content = @Content(schema = @Schema(implementation = ProductView.class))),
+					@ApiResponse(responseCode = "404", description = "Producto no encontrado", content = @Content(schema = @Schema(implementation = RestExceptionHandler.ApiError.class)))
 			}
 	)
 	public ProductView getProduct(
 			@Parameter(description = "SKU del producto", example = "SKU-1") @PathVariable String sku
 	) {
-		ProductEntity p = productRepository.findBySku(sku).orElse(null);
-		if (p == null) {
-			return null;
-		}
+		log.info("Consultando producto sku={}", sku);
+		ProductEntity p = productRepository.findBySku(sku)
+				.orElseThrow(() -> new ProductNotFoundException(sku));
 		return new ProductView(p.getSku(), p.getStatus().name());
 	}
 
@@ -91,17 +99,17 @@ public class InventoryController {
 			summary = "Consultar stock",
 			description = "Devuelve el stock por SKU y warehouseId. Si el producto existe pero no hay registro de stock, devuelve 0.",
 			responses = {
-					@ApiResponse(responseCode = "200", description = "Stock devuelto", content = @Content(schema = @Schema(implementation = StockView.class)))
+					@ApiResponse(responseCode = "200", description = "Stock devuelto", content = @Content(schema = @Schema(implementation = StockView.class))),
+					@ApiResponse(responseCode = "404", description = "Producto no encontrado", content = @Content(schema = @Schema(implementation = RestExceptionHandler.ApiError.class)))
 			}
 	)
 	public StockView getStock(
 			@Parameter(description = "SKU del producto", example = "SKU-1") @RequestParam String sku,
 			@Parameter(description = "Identificador del almacén", example = "MAIN") @RequestParam(defaultValue = "MAIN") String warehouseId
 	) {
-		ProductEntity p = productRepository.findBySku(sku).orElse(null);
-		if (p == null) {
-			return null;
-		}
+		log.info("Consultando stock sku={} warehouseId={}", sku, warehouseId);
+		ProductEntity p = productRepository.findBySku(sku)
+				.orElseThrow(() -> new ProductNotFoundException(sku));
 		return stockRepository.findByProductIdAndWarehouseId(p.getId(), warehouseId)
 				.map(s -> new StockView(sku, warehouseId, s.getQuantity()))
 				.orElse(new StockView(sku, warehouseId, 0));

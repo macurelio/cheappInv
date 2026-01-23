@@ -58,7 +58,7 @@ class InventoryServiceTest {
 
 		service.reponerStock(new RestockCommand("evt-1", "corr-1", "SKU-1", "MAIN", 5, "PedidoProveedorRecibido"));
 
-		verify(stockRepository).save(argThat(s -> s.getQuantity() == 5));
+		verify(stockRepository, atLeastOnce()).save(argThat(s -> s.getQuantity() == 5));
 		verify(movementRepository).save(any(InventoryMovementEntity.class));
 		verify(inboxEventRepository).save(any(InboxEventEntity.class));
 

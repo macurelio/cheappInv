@@ -5,11 +5,14 @@ import com.cheapp.cheappInv.application.commands.DiscountStockCommand;
 import com.cheapp.cheappInv.application.commands.RestockCommand;
 import com.cheapp.cheappInv.infra.events.consumed.ItemAgregadoEvent;
 import com.cheapp.cheappInv.infra.events.consumed.PedidoProveedorRecibidoEvent;
+import com.cheapp.cheappInv.infra.logging.Loggable;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -20,7 +23,9 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/events/in")
 @Tag(name = "Events (in)", description = "Simulación de consumo de eventos de otros microservicios (entrada).")
+@Loggable("events.in")
 public class EventsInController {
+	private static final Logger log = LoggerFactory.getLogger(EventsInController.class);
 	private final InventoryService inventoryService;
 	private final String defaultWarehouseId;
 
@@ -43,6 +48,8 @@ public class EventsInController {
 			}
 	)
 	public void itemAgregado(@RequestBody @Schema(implementation = com.cheapp.cheappInv.infra.events.consumed.ItemAgregadoEvent.class) ItemAgregadoEvent event) {
+		log.info("Evento ItemAgregado recibido eventId={} correlationId={} sku={} qty={} warehouseId={}",
+			event.eventId(), event.correlationId(), event.sku(), event.quantity(), event.warehouseId());
 		inventoryService.ensureProductExists(event.sku());
 		inventoryService.descontarStockPorItem(new DiscountStockCommand(
 				event.eventId(),
@@ -66,6 +73,8 @@ public class EventsInController {
 			}
 	)
 	public void pedidoProveedorRecibido(@RequestBody @Schema(implementation = com.cheapp.cheappInv.infra.events.consumed.PedidoProveedorRecibidoEvent.class) PedidoProveedorRecibidoEvent event) {
+		log.info("Evento PedidoProveedorRecibido recibido eventId={} correlationId={} sku={} qty={} warehouseId={}",
+			event.eventId(), event.correlationId(), event.sku(), event.quantity(), event.warehouseId());
 		inventoryService.ensureProductExists(event.sku());
 		inventoryService.reponerStock(new RestockCommand(
 				event.eventId(),

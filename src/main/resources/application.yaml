@@ -6,6 +6,13 @@ spring:
   profiles:
     default: dev
 
+logging:
+  level:
+    com.cheapp.cheappInv: INFO
+    org.springframework.web: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{correlationId}] %logger{36} - %msg%n"
+
 # --------------------
 # DEV (H2)
 # --------------------
@@ -16,10 +23,10 @@ spring:
       on-profile: dev
 
   datasource:
-    url: ${DB_URL:jdbc:h2:mem:cheappinv;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE}
+    url: ${DB_URL:jdbc:h2:mem:postgres;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE}
     driver-class-name: org.h2.Driver
-    username: ${DB_USERNAME:sa}
-    password: ${DB_PASSWORD:}
+    username: postgres
+    password:
 
   jpa:
     hibernate:

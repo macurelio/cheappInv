@@ -26,7 +26,7 @@ public class OutboxEventEntity {
 	private String correlationId;
 
 	@Lob
-	@Column(name = "payload_json", nullable = false, columnDefinition = "CLOB")
+	@Column(name = "payload_json", nullable = false, columnDefinition = "TEXT")
 	private String payloadJson;
 
 	@Column(name = "created_at", nullable = false, updatable = false)
