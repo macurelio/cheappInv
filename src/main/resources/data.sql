@@ -1,0 +1,5 @@
+-- Intencionalmente vacío.
+--
+-- Este proyecto usa:
+--  - `classpath:data-dev.sql` para el perfil `dev` (H2)
+--  - `db/postgres/seed.sql` para cargar datos en PostgreSQL

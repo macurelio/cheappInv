@@ -1,6 +1,7 @@
 package com.cheapp.cheappInv.api;
 
 import com.cheapp.cheappInv.domain.MovementType;
+import com.cheapp.cheappInv.domain.ProductStatus;
 import com.cheapp.cheappInv.infra.logging.Loggable;
 import com.cheapp.cheappInv.infra.persistence.ProductEntity;
 import com.cheapp.cheappInv.infra.persistence.ProductRepository;
@@ -14,6 +15,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -24,6 +26,8 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.TypedQuery;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -64,56 +68,61 @@ public class CatalogController {
 	) {
 		log.info("Listando productos query={} categoryCode={} status={} warehouseId={} inStockOnly={} page={} size={}",
 				query, categoryCode, status, warehouseId, inStockOnly, page, size);
-		String q = (query == null || query.isBlank()) ? null : query.trim().toLowerCase();
-		String st = (status == null || status.isBlank()) ? null : status.trim().toUpperCase();
+		String qRaw = (query == null || query.isBlank()) ? null : query.trim().toLowerCase();
+		String q = qRaw == null ? null : ("%" + qRaw + "%");
+		ProductStatus st = (status == null || status.isBlank()) ? null : ProductStatus.valueOf(status.trim().toUpperCase());
+		String cat = (categoryCode == null || categoryCode.isBlank()) ? null : categoryCode.trim();
 
-		StringBuilder jpql = new StringBuilder();
-		jpql.append("select distinct p from ProductEntity p ");
-		jpql.append(" left join fetch p.categories c ");
-		jpql.append(" where 1=1 ");
-		if (q != null) {
-			jpql.append(" and (lower(p.sku) like :q or lower(coalesce(p.name,'')) like :q) ");
-		}
-		if (st != null) {
-			jpql.append(" and p.status = com.cheapp.cheappInv.domain.ProductStatus." + st + " ");
-		}
-		if (categoryCode != null && !categoryCode.isBlank()) {
-			jpql.append(" and c.code = :categoryCode ");
-		}
-		jpql.append(" order by coalesce(p.name,p.sku) asc ");
+		// 1) page de IDs (sin fetch join) -> evita DISTINCT+ORDER BY problemático en PostgreSQL
+		Pageable pageable = PageRequest.of(page, size);
+		List<Long> ids = productRepository.findCatalogProductIdsWithSortKey(q, st, cat, pageable).stream()
+				.map(r -> (Long) r[0])
+				.toList();
 
-		TypedQuery<ProductEntity> typedQuery = entityManager.createQuery(jpql.toString(), ProductEntity.class);
-		if (q != null) {
-			typedQuery.setParameter("q", "%" + q + "%");
-		}
-		if (categoryCode != null && !categoryCode.isBlank()) {
-			typedQuery.setParameter("categoryCode", categoryCode.trim());
+		// IMPORTANTE: por el join a categorías, la query de IDs puede devolver duplicados.
+		// Los deduplicamos preservando el orden para evitar Duplicate key al rearmar el mapa.
+		if (ids.size() > 1) {
+			ids = new ArrayList<>(new LinkedHashSet<>(ids));
 		}
 
-		typedQuery.setFirstResult(page * size);
-		typedQuery.setMaxResults(size);
-		List<ProductEntity> products = typedQuery.getResultList();
-
-		// count: no puede usar fetch join
+		// 2) count
 		String countJpql = "select count(distinct p.id) from ProductEntity p left join p.categories c where 1=1 ";
 		if (q != null) {
 			countJpql += " and (lower(p.sku) like :q or lower(coalesce(p.name,'')) like :q) ";
 		}
 		if (st != null) {
-			countJpql += " and p.status = com.cheapp.cheappInv.domain.ProductStatus." + st + " ";
+			countJpql += " and p.status = :status ";
 		}
-		if (categoryCode != null && !categoryCode.isBlank()) {
+		if (cat != null) {
 			countJpql += " and c.code = :categoryCode ";
 		}
 
 		TypedQuery<Long> countQuery = entityManager.createQuery(countJpql, Long.class);
 		if (q != null) {
-			countQuery.setParameter("q", "%" + q + "%");
+			countQuery.setParameter("q", q);
 		}
-		if (categoryCode != null && !categoryCode.isBlank()) {
-			countQuery.setParameter("categoryCode", categoryCode.trim());
+		if (st != null) {
+			countQuery.setParameter("status", st);
+		}
+		if (cat != null) {
+			countQuery.setParameter("categoryCode", cat);
 		}
 		long total = countQuery.getSingleResult();
+
+		// 3) fetch entities with categories for the current page
+		List<ProductEntity> products;
+		if (ids.isEmpty()) {
+			products = List.of();
+		} else {
+			// la query IN(:ids) no garantiza orden; reordenamos según ids
+			// Nota: con LEFT JOIN FETCH a categorías, Hibernate puede devolver el mismo producto repetido.
+			Map<Long, ProductEntity> byId = productRepository.findAllWithCategoriesByIdIn(ids).stream()
+					.collect(Collectors.toMap(ProductEntity::getId, p -> p, (a, b) -> {
+						log.debug("Producto duplicado en fetch por id={} (manteniendo el primero)", a.getId());
+						return a;
+					}));
+			products = ids.stream().map(byId::get).filter(p -> p != null).toList();
+		}
 
 		// stock for current page
 		Map<Long, Long> stockByProductId = products.stream()
@@ -156,7 +165,7 @@ public class CatalogController {
 		query.setParameter("wh", warehouseId);
 		query.setParameter("type", type);
 		List<Object[]> rows = query.getResultList();
-		return rows.stream().collect(Collectors.toMap(r -> (Long) r[0], r -> (Instant) r[1]));
+		return rows.stream().collect(Collectors.toMap(r -> (Long) r[0], r -> (Instant) r[1], (a, b) -> a));
 	}
 
 	public record CategoryView(String code, String name) {

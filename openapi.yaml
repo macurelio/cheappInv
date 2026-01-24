@@ -5,59 +5,102 @@ info:
 servers:
 - url: http://localhost:9090
   description: Generated server url
+tags:
+- name: Catalog
+  description: "Endpoints de lectura para navegar el inventario como un supermercado\
+    \ (búsqueda, filtros, métricas)."
+- name: Events (in)
+  description: Simulación de consumo de eventos de otros microservicios (entrada).
+- name: Categories
+  description: Listado de categorías para segmentar productos.
+- name: Inventory
+  description: "API REST del microservicio de inventario (producto, stock y acciones\
+    \ administrativas)."
 paths:
   /api/products/{sku}/reactivate:
     post:
       tags:
-      - inventory-controller
+      - Inventory
+      summary: Reactivar producto
+      description: Marca el producto como ACTIVE.
       operationId: reactivate
       parameters:
       - name: sku
         in: path
+        description: SKU del producto
         required: true
         schema:
           type: string
+        example: SKU-1
       - name: correlationId
         in: query
+        description: Correlation ID para trazabilidad
         required: false
         schema:
           type: string
+        example: corr-123
       - name: reason
         in: query
+        description: Motivo de reactivación
         required: false
         schema:
           type: string
+        example: Vuelve a estar disponible
       responses:
         "204":
-          description: No Content
+          description: Producto reactivado
+        "404":
+          description: Producto no encontrado
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /api/products/{sku}/block:
     post:
       tags:
-      - inventory-controller
+      - Inventory
+      summary: Bloquear producto
+      description: "Marca el producto como BLOCKED. Mientras esté bloqueado, no se\
+        \ permiten descuentos de stock."
       operationId: block
       parameters:
       - name: sku
         in: path
+        description: SKU del producto
         required: true
         schema:
           type: string
+        example: SKU-1
       - name: correlationId
         in: query
+        description: Correlation ID para trazabilidad
         required: false
         schema:
           type: string
+        example: corr-123
       - name: reason
         in: query
+        description: Motivo del bloqueo
         required: false
         schema:
           type: string
+        example: Producto retirado
       responses:
         "204":
-          description: No Content
+          description: Producto bloqueado
+        "404":
+          description: Producto no encontrado
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /api/events/in/pedido-proveedor-recibido:
     post:
       tags:
-      - events-in-controller
+      - Events (in)
+      summary: "Consumir evento: PedidoProveedorRecibido"
+      description: "Simula el consumo del evento PedidoProveedorRecibido. Repone stock\
+        \ de forma transaccional, con locking pesimista e idempotencia por eventId."
       operationId: pedidoProveedorRecibido
       requestBody:
         content:
@@ -67,11 +110,24 @@ paths:
         required: true
       responses:
         "202":
-          description: Accepted
+          description: Evento duplicado (idempotencia)
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "400":
+          description: Request inválido
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /api/events/in/item-agregado:
     post:
       tags:
-      - events-in-controller
+      - Events (in)
+      summary: "Consumir evento: ItemAgregado"
+      description: "Simula el consumo del evento ItemAgregado. Descuenta stock de\
+        \ forma transaccional, con locking pesimista e idempotencia por eventId."
       operationId: itemAgregado
       requestBody:
         content:
@@ -81,93 +137,280 @@ paths:
         required: true
       responses:
         "202":
-          description: Accepted
+          description: Evento duplicado (idempotencia)
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Conflicto (stock insuficiente o producto bloqueado)
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "400":
+          description: Request inválido
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /api/stock:
     get:
       tags:
-      - inventory-controller
+      - Inventory
+      summary: Consultar stock
+      description: "Devuelve el stock por SKU y warehouseId. Si el producto existe\
+        \ pero no hay registro de stock, devuelve 0."
       operationId: getStock
       parameters:
       - name: sku
         in: query
+        description: SKU del producto
         required: true
         schema:
           type: string
+        example: SKU-1
       - name: warehouseId
         in: query
+        description: Identificador del almacén
         required: false
         schema:
           type: string
           default: MAIN
+        example: MAIN
       responses:
         "200":
-          description: OK
+          description: Stock devuelto
           content:
             '*/*':
               schema:
                 $ref: "#/components/schemas/StockView"
+  /api/products:
+    get:
+      tags:
+      - Catalog
+      summary: Listar productos (catálogo)
+      description: "Listado paginado para UI tipo supermercado. Permite filtrar por\
+        \ texto (sku/nombre), categoría, estado y (opcionalmente) stock por warehouse."
+      operationId: listProducts
+      parameters:
+      - name: query
+        in: query
+        description: Texto a buscar en sku o nombre
+        required: false
+        schema:
+          type: string
+      - name: categoryCode
+        in: query
+        description: Filtrar por código de categoría
+        required: false
+        schema:
+          type: string
+      - name: status
+        in: query
+        description: Filtrar por estado (ACTIVE/BLOCKED)
+        required: false
+        schema:
+          type: string
+      - name: warehouseId
+        in: query
+        description: Almacén para calcular stock
+        required: false
+        schema:
+          type: string
+          default: MAIN
+      - name: inStockOnly
+        in: query
+        description: Solo productos con stock > 0
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 0
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 20
+      responses:
+        "200":
+          description: Página de productos
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ProductListItem"
   /api/products/{sku}:
     get:
       tags:
-      - inventory-controller
+      - Inventory
+      summary: Consultar producto
+      description: "Devuelve el estado actual del producto. Nota: actualmente, si\
+        \ no existe, la API responde vacío (null)."
       operationId: getProduct
       parameters:
       - name: sku
         in: path
+        description: SKU del producto
         required: true
         schema:
           type: string
+        example: SKU-1
+      responses:
+        "200":
+          description: Producto encontrado
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ProductView"
+  /api/categories:
+    get:
+      tags:
+      - Categories
+      summary: "Listar categor\0edas"
+      operationId: list
       responses:
         "200":
           description: OK
           content:
             '*/*':
               schema:
-                $ref: "#/components/schemas/ProductView"
+                type: array
+                items:
+                  $ref: "#/components/schemas/CategoryView"
 components:
   schemas:
+    ApiError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
     PedidoProveedorRecibidoEvent:
       type: object
+      description: "Evento de entrada: llegó mercadería del proveedor y debe reponerse\
+        \ stock."
       properties:
         eventId:
           type: string
+          description: ID único del evento (para idempotencia)
+          example: evt-124
         correlationId:
           type: string
+          description: Correlation ID para trazabilidad
+          example: corr-1
         sku:
           type: string
+          description: SKU del producto
+          example: SKU-1
         quantity:
           type: integer
           format: int64
+          description: Cantidad a reponer
+          example: 5
+          minimum: 1
         warehouseId:
           type: string
+          description: "Warehouse/almacén (si no viene, se usa el default)"
+          example: MAIN
     ItemAgregadoEvent:
       type: object
+      description: "Evento de entrada: se agregó un ítem a una orden/pedido y debe\
+        \ descontarse stock."
       properties:
         eventId:
           type: string
+          description: ID único del evento (para idempotencia)
+          example: evt-123
         correlationId:
           type: string
+          description: Correlation ID para trazabilidad
+          example: corr-1
         sku:
           type: string
+          description: SKU del producto
+          example: SKU-1
         quantity:
           type: integer
           format: int64
+          description: Cantidad a descontar
+          example: 2
+          minimum: 1
         warehouseId:
           type: string
+          description: "Warehouse/almacén (si no viene, se usa el default)"
+          example: MAIN
     StockView:
       type: object
       properties:
         sku:
           type: string
+          description: SKU del producto
+          example: SKU-1
         warehouseId:
           type: string
+          description: Identificador del almacén
+          example: MAIN
         quantity:
           type: integer
           format: int64
+          description: Cantidad disponible
+          example: 10
+    CategoryView:
+      type: object
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+    ProductListItem:
+      type: object
+      properties:
+        sku:
+          type: string
+        name:
+          type: string
+        brand:
+          type: string
+        status:
+          type: string
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/CategoryView"
+        warehouseId:
+          type: string
+        stockQuantity:
+          type: integer
+          format: int64
+        lastRequestedAt:
+          type: string
+          format: date-time
+        estimatedExpiryAt:
+          type: string
+          format: date-time
+        unitType:
+          type: string
+        unitCode:
+          type: string
+        unitAmount:
+          type: string
     ProductView:
       type: object
       properties:
         sku:
           type: string
+          description: SKU del producto
+          example: SKU-1
         status:
           type: string
+          description: Estado del producto
+          example: ACTIVE

@@ -1,0 +1,238 @@
+{
+  "info": {
+    "_postman_id": "b0f6b5b3-7c74-4a54-9c61-0b48fb94d5f6",
+    "name": "CheappInv - All endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Colección para probar todos los endpoints del microservicio cheappInv. Usa variables para host/puerto y ejemplos de payloads."
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:9090",
+      "type": "string"
+    },
+    {
+      "key": "sku",
+      "value": "MILK-1",
+      "type": "string"
+    },
+    {
+      "key": "warehouseId",
+      "value": "MAIN",
+      "type": "string"
+    },
+    {
+      "key": "categoryCode",
+      "value": "DAIRY",
+      "type": "string"
+    },
+    {
+      "key": "correlationId",
+      "value": "corr-postman-1",
+      "type": "string"
+    },
+    {
+      "key": "reason",
+      "value": "test",
+      "type": "string"
+    },
+    {
+      "key": "eventId",
+      "value": "evt-postman-1",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health / Smoke",
+      "item": [
+        {
+          "name": "Get Stock (baseline)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/stock?sku={{sku}}&warehouseId={{warehouseId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "stock"],
+              "query": [
+                { "key": "sku", "value": "{{sku}}" },
+                { "key": "warehouseId", "value": "{{warehouseId}}" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Product (by sku)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{sku}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "products", "{{sku}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Categories",
+      "item": [
+        {
+          "name": "List Categories",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/categories",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "categories"]
+            }
+          }
+        },
+        {
+          "name": "List Products by Category",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/categories/{{categoryCode}}/products?warehouseId={{warehouseId}}&inStockOnly=false&page=0&size=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "categories", "{{categoryCode}}", "products"],
+              "query": [
+                { "key": "warehouseId", "value": "{{warehouseId}}" },
+                { "key": "inStockOnly", "value": "false" },
+                { "key": "page", "value": "0" },
+                { "key": "size", "value": "20" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Catalog",
+      "item": [
+        {
+          "name": "List Products (no filters)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/products?warehouseId={{warehouseId}}&page=0&size=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "products"],
+              "query": [
+                { "key": "warehouseId", "value": "{{warehouseId}}" },
+                { "key": "page", "value": "0" },
+                { "key": "size", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Products (filter by categoryCode)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/products?categoryCode={{categoryCode}}&warehouseId={{warehouseId}}&page=0&size=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "products"],
+              "query": [
+                { "key": "categoryCode", "value": "{{categoryCode}}" },
+                { "key": "warehouseId", "value": "{{warehouseId}}" },
+                { "key": "page", "value": "0" },
+                { "key": "size", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Products (search query)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/products?query={{sku}}&warehouseId={{warehouseId}}&page=0&size=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "products"],
+              "query": [
+                { "key": "query", "value": "{{sku}}" },
+                { "key": "warehouseId", "value": "{{warehouseId}}" },
+                { "key": "page", "value": "0" },
+                { "key": "size", "value": "20" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Inventory Admin",
+      "item": [
+        {
+          "name": "Block Product",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{sku}}/block?correlationId={{correlationId}}&reason={{reason}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "products", "{{sku}}", "block"],
+              "query": [
+                { "key": "correlationId", "value": "{{correlationId}}" },
+                { "key": "reason", "value": "{{reason}}" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reactivate Product",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/products/{{sku}}/reactivate?correlationId={{correlationId}}&reason={{reason}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "products", "{{sku}}", "reactivate"],
+              "query": [
+                { "key": "correlationId", "value": "{{correlationId}}" },
+                { "key": "reason", "value": "{{reason}}" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Events In",
+      "item": [
+        {
+          "name": "POST pedido-proveedor-recibido",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"{{eventId}}\",\n  \"correlationId\": \"{{correlationId}}\",\n  \"sku\": \"{{sku}}\",\n  \"quantity\": 5,\n  \"warehouseId\": \"{{warehouseId}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/events/in/pedido-proveedor-recibido",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events", "in", "pedido-proveedor-recibido"]
+            }
+          }
+        },
+        {
+          "name": "POST item-agregado",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"{{eventId}}\",\n  \"correlationId\": \"{{correlationId}}\",\n  \"sku\": \"{{sku}}\",\n  \"quantity\": 1,\n  \"warehouseId\": \"{{warehouseId}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/events/in/item-agregado",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "events", "in", "item-agregado"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

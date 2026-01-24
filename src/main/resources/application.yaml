@@ -2,9 +2,9 @@ spring:
   application:
     name: cheappInv
 
-  # Perfil por defecto: dev (H2 en memoria)
+  # Perfil por defecto: postgres
   profiles:
-    default: dev
+    default: postgres
 
 logging:
   level:
@@ -21,6 +21,11 @@ spring:
   config:
     activate:
       on-profile: dev
+
+  sql:
+    init:
+      mode: embedded
+      data-locations: classpath:data-dev.sql
 
   datasource:
     url: ${DB_URL:jdbc:h2:mem:postgres;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE}
@@ -68,6 +73,12 @@ spring:
   config:
     activate:
       on-profile: postgres
+
+  sql:
+    init:
+      # En Postgres no cargamos data.sql por defecto (el SQL de H2 usa MERGE/DATEADD).
+      # Para seed local usa: db/postgres/seed.sql
+      mode: never
 
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/cheappinv}
