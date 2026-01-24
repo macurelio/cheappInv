@@ -46,6 +46,14 @@ En el repo tienes un script listo para ejecutar en PostgreSQL:
 
 Crea las tablas: `products`, `stock`, `inventory_movements`, `inbox_events`, `outbox_events` con sus índices/constraints.
 
+#### Seed PostgreSQL (datos demo)
+
+Además del init, hay un seed (útil para UI/QA local):
+
+- `db/postgres/seed.sql`
+
+> Nota: este seed inserta categorías y productos con relaciones, por lo que es común tener productos con **varias categorías**.
+
 #### Configuración rápida para usar PostgreSQL (ejemplo)
 
 Ejemplo de properties (puedes ponerlo en un `application-postgres.yaml` o variables de entorno):
@@ -134,7 +142,41 @@ En un entorno real, `OutboxPublisher` se implementaría para enviar a Kafka/Rabb
 
 Todos bajo prefijo `/api`.
 
-### 6.1 Gestión de producto
+### 6.1 Catálogo (lectura para UI)
+
+#### Listar productos (catálogo)
+- `GET /api/products`
+
+Parámetros:
+- `query` (opcional): búsqueda por `sku` o `name`.
+- `categoryCode` (opcional)
+- `status` (opcional): `ACTIVE|BLOCKED`
+- `warehouseId` (default: `MAIN`) para calcular stock
+- `inStockOnly` (default: `false`)
+- `page` (default: `0`)
+- `size` (default: `20`)
+
+##### Flujo interno (importante en PostgreSQL)
+
+Para soportar paginación + categorías sin problemas en Postgres (y evitar duplicados), el endpoint sigue un flujo **en 2 pasos**:
+
+1) **Consulta de IDs paginados** (sin `fetch join`):
+   - Obtiene los IDs de producto en orden estable (`name/sku`, luego `id`).
+   - Como el filtro puede incluir `left join` a categorías, se aplica **deduplicación** de IDs (un producto puede pertenecer a varias categorías).
+
+2) **Fetch de entidades por IDs** (con `left join fetch p.categories`):
+   - Se traen los `ProductEntity` con sus categorías.
+   - Se arma un mapa `id -> ProductEntity` tolerante a duplicados (Hibernate puede repetir filas por el `fetch join`).
+   - Se reordena según la lista de IDs para mantener el orden correcto de la página.
+
+3) **Enriquecimiento**:
+   - Se consulta stock por producto para `warehouseId`.
+   - Se calcula `lastRequestedAt` como el último `CREDIT` (última reposición) por producto.
+   - Si existe `estimatedShelfLifeDays`, se calcula `estimatedExpiryAt`.
+
+> Este endpoint tuvo una regresión histórica típica: si un producto tenía varias categorías, podía explotar con `Duplicate key ...` al construir el mapa. Ahora el flujo deduplica y el código tolera duplicados.
+
+### 6.2 Gestión de producto
 
 #### Bloquear producto
 - `POST /api/products/{sku}/block`
@@ -164,7 +206,7 @@ Efecto:
   - `200 OK` con `{ "sku": "...", "status": "ACTIVE|BLOCKED" }`
   - Si no existe, actualmente devuelve `null` (Spring lo serializa como respuesta vacía). En un API productivo sería preferible `404`.
 
-### 6.2 Consulta de stock
+### 6.3 Consulta de stock
 
 - `GET /api/stock?sku=...&warehouseId=MAIN`
 - `warehouseId` por defecto: `MAIN`
@@ -174,7 +216,7 @@ Respuesta:
 - Si el producto existe pero no hay stock, devuelve `quantity=0`.
 - Si el producto no existe, actualmente devuelve `null`.
 
-### 6.3 Simulación de consumo de eventos (opcional)
+### 6.4 Simulación de consumo de eventos (opcional)
 
 Estos endpoints simulan lo que en producción sería un consumidor de mensajería.
 
@@ -249,6 +291,11 @@ Formato de error:
 2. Reenviar el mismo request con el mismo `eventId`.
 3. Resultado esperado: **202** con `DUPLICATE_EVENT`.
 
+### Flujo C: catálogo con filtros y productos multi-categoría
+1. Crear/seedear un producto con múltiples categorías (el `seed.sql` ya lo hace en Postgres).
+2. `GET /api/products?warehouseId=MAIN&page=0&size=20`
+3. Resultado esperado: **200** (no debe ocurrir `Duplicate key ...`).
+
 ## 9) Observabilidad
 
 - Actuator expone `health` e `info`:
@@ -280,7 +327,33 @@ Regeneración (local):
 
 Esto levanta el servicio en un puerto temporal (por defecto `9090`), descarga `/v3/api-docs.yaml` y lo guarda en `openapi.yaml`.
 
-## 10) Notas y mejoras sugeridas (opcional)
+## 10) Tests (cómo verificamos el flujo)
+
+El repositorio incluye tests unitarios e integración.
+
+### 10.1 Unit tests (dominio/aplicación)
+- `InventoryServiceTest` cubre:
+  - `reponerStock` crea stock si no existe y escribe outbox/inbox
+  - `descontarStock` falla si no hay suficiente
+  - bloqueo e idempotencia
+
+### 10.2 Integration tests (HTTP + Postgres)
+- `CatalogControllerIntegrationTest` cubre:
+  - `/api/products` con filtros por categoría + campos calculados (`lastRequestedAt`, `estimatedExpiryAt`)
+  - `/api/products` con producto con **múltiples categorías** (regresión de `Duplicate key`)
+  - `/api/categories/{code}/products`
+
+- `InventoryServiceIntegrationTest` cubre:
+  - reposición + descuento afectan stock y outbox
+  - caso de stock insuficiente
+
+### 10.3 Ejecutar tests
+
+```bash
+./mvnw test
+```
+
+## 11) Notas y mejoras sugeridas (opcional)
 
 - Los `GET` que retornan `null` podrían migrarse a `404` para consistencia del contrato HTTP.
 - Implementar un `OutboxPublisher` real (Kafka/Rabbit/SQS) manteniendo el scheduler y la tabla outbox.

@@ -46,7 +46,7 @@ public class ProductEntity {
 	@Column(name = "estimated_shelf_life_days")
 	private Integer estimatedShelfLifeDays;
 
-	@ManyToMany(fetch = FetchType.EAGER)
+	@ManyToMany(fetch = FetchType.LAZY)
 	@JoinTable(
 			name = "product_categories",
 			joinColumns = @JoinColumn(name = "product_id"),
