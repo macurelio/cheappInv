@@ -1,13 +1,13 @@
 package com.cheapp.cheappInv.application;
 
 import com.cheapp.cheappInv.application.commands.BlockProductCommand;
+import com.cheapp.cheappInv.application.commands.ConsumeComandaCommand;
 import com.cheapp.cheappInv.application.commands.DiscountStockCommand;
 import com.cheapp.cheappInv.application.commands.ReactivateProductCommand;
 import com.cheapp.cheappInv.application.commands.RestockCommand;
 import com.cheapp.cheappInv.domain.*;
 import com.cheapp.cheappInv.infra.events.emitted.ProductoBloqueadoEvent;
 import com.cheapp.cheappInv.infra.events.emitted.StockDescontadoEvent;
-import com.cheapp.cheappInv.infra.events.emitted.StockRepuestoEvent;
 import com.cheapp.cheappInv.infra.persistence.*;
 import tools.jackson.databind.json.JsonMapper;
 import org.springframework.stereotype.Service;
@@ -26,6 +26,9 @@ public class InventoryService {
 	private final OutboxEventRepository outboxEventRepository;
 	private final JsonMapper jsonMapper;
 	private final Clock clock;
+	private final RecipesRepository recipesRepository;
+	private final ProcessedComandaRepository processedComandaRepository;
+	private final HistoricalConsumptionRepository historicalConsumptionRepository;
 
 	public InventoryService(ProductRepository productRepository,
 						StockRepository stockRepository,
@@ -33,7 +36,10 @@ public class InventoryService {
 						InboxEventRepository inboxEventRepository,
 						OutboxEventRepository outboxEventRepository,
 						JsonMapper jsonMapper,
-						Clock clock) {
+						Clock clock,
+						RecipesRepository recipesRepository,
+						ProcessedComandaRepository processedComandaRepository,
+						HistoricalConsumptionRepository historicalConsumptionRepository) {
 		this.productRepository = productRepository;
 		this.stockRepository = stockRepository;
 		this.movementRepository = movementRepository;
@@ -41,6 +47,9 @@ public class InventoryService {
 		this.outboxEventRepository = outboxEventRepository;
 		this.jsonMapper = jsonMapper;
 		this.clock = clock;
+		this.recipesRepository = recipesRepository;
+		this.processedComandaRepository = processedComandaRepository;
+		this.historicalConsumptionRepository = historicalConsumptionRepository;
 	}
 
 	@Transactional
@@ -125,12 +134,11 @@ public class InventoryService {
 			inboxEventRepository.save(new InboxEventEntity(cmd.eventId(), "PedidoProveedorRecibido", now));
 		}
 
-		writeOutbox("StockRepuesto", cmd.correlationId(), new StockRepuestoEvent(cmd.sku(), warehouse, cmd.quantity(), newQty));
+		writeOutbox("StockRepuesto", cmd.correlationId(), new com.cheapp.cheappInv.infra.events.emitted.StockRepuestoEvent(cmd.sku(), warehouse, cmd.quantity(), newQty));
 	}
 
 	@Transactional
 	public void bloquearProducto(BlockProductCommand cmd) {
-		Instant now = Instant.now(clock);
 		ProductEntity product = productRepository.findBySku(cmd.sku())
 				.orElseThrow(() -> new ProductNotFoundException(cmd.sku()));
 		product.setStatus(ProductStatus.BLOCKED);
@@ -153,6 +161,111 @@ public class InventoryService {
 		Instant now = Instant.now(clock);
 		return productRepository.findBySku(sku)
 				.orElseGet(() -> productRepository.save(new ProductEntity(sku, now)));
+	}
+
+	/**
+	 * Flujo: ComandaCerrada -> resolver recetas activas por plato -> consumir ingredientes.
+	 *
+	 * Reglas:
+	 * - Idempotencia por comandaId.
+	 * - Stock nunca negativo.
+	 * - Si una línea deja un insumo en 0, bloquea el producto.
+	 */
+	@Transactional
+	public void descontarStockPorReceta(ConsumeComandaCommand cmd) {
+		if (cmd.comandaId() == null || cmd.comandaId().isBlank()) {
+			throw new IllegalArgumentException("comandaId es requerido");
+		}
+		if (cmd.dishes() == null || cmd.dishes().isEmpty()) {
+			return; // nada que hacer
+		}
+
+		// Idempotencia: eventId (bus) + comandaId (negocio)
+		if (cmd.eventId() != null && inboxEventRepository.existsByEventId(cmd.eventId())) {
+			throw new com.cheapp.cheappInv.domain.IdempotencyViolationException(cmd.eventId());
+		}
+		if (processedComandaRepository.existsByComandaId(cmd.comandaId())) {
+			throw new ComandaAlreadyProcessedException(cmd.comandaId());
+		}
+
+		String warehouse = (cmd.warehouseId() == null || cmd.warehouseId().isBlank()) ? "MAIN" : cmd.warehouseId();
+		Instant now = Instant.now(clock);
+
+		// 1) calcular consumo total por ingrediente
+		java.util.Map<String, Long> totalByIngredientSku = new java.util.HashMap<>();
+		for (ConsumeComandaCommand.ComandaDishLine dish : cmd.dishes()) {
+			if (dish.quantity() <= 0) {
+				throw new IllegalArgumentException("dish.quantity debe ser > 0");
+			}
+			var recipe = recipesRepository.findActiveByDishSku(dish.dishSku())
+					.orElseThrow(() -> new IllegalStateException("No hay receta ACTIVE para plato: " + dish.dishSku()));
+			for (var ing : recipe.getIngredients()) {
+				long consumed = Math.multiplyExact(ing.getQuantity(), dish.quantity());
+				totalByIngredientSku.merge(ing.getIngredientSku(), consumed, Math::addExact);
+			}
+		}
+
+		// 2) aplicar consumo por ingrediente
+		for (var e : totalByIngredientSku.entrySet()) {
+			String ingredientSku = e.getKey();
+			long qtyToConsume = e.getValue();
+			assertValidQuantity(qtyToConsume);
+
+			ProductEntity product = productRepository.findBySku(ingredientSku)
+					.orElseThrow(() -> new com.cheapp.cheappInv.domain.ProductNotFoundException(ingredientSku));
+
+			if (product.getStatus() == ProductStatus.BLOCKED) {
+				// ya bloqueado; reportamos insuficiente para visibilidad
+				writeOutbox("StockInsuficiente", cmd.correlationId(), new com.cheapp.cheappInv.infra.events.emitted.StockInsuficienteEvent(cmd.comandaId(), ingredientSku, warehouse, qtyToConsume, 0));
+				throw new com.cheapp.cheappInv.domain.ProductBlockedException(ingredientSku);
+			}
+
+			StockEntity stock = stockRepository.findForUpdate(product.getId(), warehouse)
+					.orElseGet(() -> stockRepository.save(new StockEntity(product, warehouse, 0, now)));
+
+			long available = stock.getQuantity();
+			if (available < qtyToConsume) {
+				writeOutbox("StockInsuficiente", cmd.correlationId(), new com.cheapp.cheappInv.infra.events.emitted.StockInsuficienteEvent(cmd.comandaId(), ingredientSku, warehouse, qtyToConsume, available));
+				throw new StockInsufficientException(ingredientSku, qtyToConsume, available);
+			}
+
+			long newQty = available - qtyToConsume;
+			stock.setQuantity(newQty);
+			stock.setUpdatedAt(now);
+			stockRepository.save(stock);
+
+			movementRepository.save(new InventoryMovementEntity(
+					product,
+					warehouse,
+					com.cheapp.cheappInv.domain.MovementType.DEBIT,
+					qtyToConsume,
+					"ComandaCerrada:" + cmd.comandaId(),
+					cmd.eventId(),
+					cmd.correlationId(),
+					now
+			));
+
+			historicalConsumptionRepository.save(new HistoricalConsumptionEntity(ingredientSku, qtyToConsume, cmd.comandaId(), now));
+
+			writeOutbox("StockDescontado", cmd.correlationId(), new StockDescontadoEvent(ingredientSku, warehouse, qtyToConsume, newQty));
+
+			if (newQty == 0 && product.getStatus() != ProductStatus.BLOCKED) {
+				product.setStatus(ProductStatus.BLOCKED);
+				productRepository.save(product);
+				writeOutbox("ProductoBloqueado", cmd.correlationId(), new ProductoBloqueadoEvent(ingredientSku, "Stock en cero"));
+			}
+			if (newQty > 0 && product.getStatus() == ProductStatus.BLOCKED) {
+				product.setStatus(ProductStatus.ACTIVE);
+				productRepository.save(product);
+				writeOutbox("ProductoReactivado", cmd.correlationId(), new com.cheapp.cheappInv.infra.events.emitted.ProductoReactivadoEvent(ingredientSku, "Stock disponible"));
+			}
+		}
+
+		// 3) marcar comanda procesada solo al final (transaccional)
+		processedComandaRepository.save(new ProcessedComandaEntity(cmd.comandaId(), now));
+		if (cmd.eventId() != null) {
+			inboxEventRepository.save(new InboxEventEntity(cmd.eventId(), "ComandaCerrada", now));
+		}
 	}
 
 	private void writeOutbox(String eventType, String correlationId, Object payload) {

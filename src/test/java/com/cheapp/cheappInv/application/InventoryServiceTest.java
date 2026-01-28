@@ -27,6 +27,9 @@ class InventoryServiceTest {
 	private OutboxEventRepository outboxEventRepository;
 	private JsonMapper jsonMapper;
 	private Clock clock;
+	private RecipesRepository recipesRepository;
+	private ProcessedComandaRepository processedComandaRepository;
+	private HistoricalConsumptionRepository historicalConsumptionRepository;
 
 	private InventoryService service;
 
@@ -37,14 +40,18 @@ class InventoryServiceTest {
 		movementRepository = mock(InventoryMovementRepository.class);
 		inboxEventRepository = mock(InboxEventRepository.class);
 		outboxEventRepository = mock(OutboxEventRepository.class);
+		recipesRepository = mock(RecipesRepository.class);
+		processedComandaRepository = mock(ProcessedComandaRepository.class);
+		historicalConsumptionRepository = mock(HistoricalConsumptionRepository.class);
 		jsonMapper = mock(JsonMapper.class);
 		clock = TestClock.fixedUtc();
 
-		service = new InventoryService(productRepository, stockRepository, movementRepository, inboxEventRepository, outboxEventRepository, jsonMapper, clock);
+		service = new InventoryService(productRepository, stockRepository, movementRepository, inboxEventRepository, outboxEventRepository, jsonMapper, clock,
+			recipesRepository, processedComandaRepository, historicalConsumptionRepository);
 	}
 
 	@Test
-	void reponerStock_creaStockSiNoExiste_yGuardaMovimientoInboxYOutbox() throws Exception {
+	void reponerStock_creaStockSiNoExiste_yGuardaMovimientoInboxYOutbox() {
 		var now = Instant.now(clock);
 		var product = new ProductEntity("SKU-1", now);
 		// set id via reflection no es necesario; para repositorio usamos el mismo objeto.
@@ -111,7 +118,7 @@ class InventoryServiceTest {
 	}
 
 	@Test
-	void bloquearProducto_publicaOutbox_yActualizaEstado() throws Exception {
+	void bloquearProducto_publicaOutbox_yActualizaEstado() {
 		var now = Instant.now(clock);
 		var product = new ProductEntity("SKU-1", now);
 

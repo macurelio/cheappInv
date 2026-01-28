@@ -3,8 +3,10 @@ package com.cheapp.cheappInv.api;
 import com.cheapp.cheappInv.application.InventoryService;
 import com.cheapp.cheappInv.application.commands.DiscountStockCommand;
 import com.cheapp.cheappInv.application.commands.RestockCommand;
+import com.cheapp.cheappInv.application.commands.ConsumeComandaCommand;
 import com.cheapp.cheappInv.infra.events.consumed.ItemAgregadoEvent;
 import com.cheapp.cheappInv.infra.events.consumed.PedidoProveedorRecibidoEvent;
+import com.cheapp.cheappInv.infra.events.consumed.ComandaCerradaEvent;
 import com.cheapp.cheappInv.infra.logging.Loggable;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -83,6 +85,34 @@ public class EventsInController {
 				event.warehouseId() == null ? defaultWarehouseId : event.warehouseId(),
 				event.quantity(),
 				"PedidoProveedorRecibido"
+		));
+	}
+
+	@PostMapping("/comanda-cerrada")
+	@ResponseStatus(HttpStatus.ACCEPTED)
+	@Operation(
+			summary = "Consumir evento: ComandaCerrada",
+			description = "Simula el consumo del evento ComandaCerrada. Resuelve recetas activas por plato, descuenta stock por ingrediente y registra consumo histórico. Idempotente por comandaId.",
+			responses = {
+					@ApiResponse(responseCode = "202", description = "Evento aceptado/procesado"),
+					@ApiResponse(responseCode = "202", description = "Evento duplicado (idempotencia)", content = @Content(schema = @Schema(implementation = RestExceptionHandler.ApiError.class))),
+					@ApiResponse(responseCode = "409", description = "Conflicto (stock insuficiente o producto bloqueado)", content = @Content(schema = @Schema(implementation = RestExceptionHandler.ApiError.class))),
+					@ApiResponse(responseCode = "400", description = "Request inválido", content = @Content(schema = @Schema(implementation = RestExceptionHandler.ApiError.class)))
+			}
+	)
+	public void comandaCerrada(@RequestBody @Schema(implementation = ComandaCerradaEvent.class) ComandaCerradaEvent event) {
+		log.info("Evento ComandaCerrada recibido eventId={} correlationId={} comandaId={} dishes={} warehouseId={}",
+			event.eventId(), event.correlationId(), event.comandaId(), event.dishes() == null ? 0 : event.dishes().size(), event.warehouseId());
+
+		var dishes = (event.dishes() == null) ? java.util.List.<ConsumeComandaCommand.ComandaDishLine>of() :
+			event.dishes().stream().map(d -> new ConsumeComandaCommand.ComandaDishLine(d.dishSku(), d.quantity())).toList();
+
+		inventoryService.descontarStockPorReceta(new ConsumeComandaCommand(
+				event.eventId(),
+				event.correlationId(),
+				event.comandaId(),
+				dishes,
+				event.warehouseId() == null ? defaultWarehouseId : event.warehouseId()
 		));
 	}
 }

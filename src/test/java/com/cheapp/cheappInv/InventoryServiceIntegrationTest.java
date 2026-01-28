@@ -1,12 +1,18 @@
 package com.cheapp.cheappInv;
 
 import com.cheapp.cheappInv.application.InventoryService;
+import com.cheapp.cheappInv.application.RecipeService;
+import com.cheapp.cheappInv.application.commands.ActivateRecipeCommand;
+import com.cheapp.cheappInv.application.commands.AddIngredientToRecipeCommand;
 import com.cheapp.cheappInv.application.commands.BlockProductCommand;
+import com.cheapp.cheappInv.application.commands.ConsumeComandaCommand;
+import com.cheapp.cheappInv.application.commands.CreateRecipeCommand;
 import com.cheapp.cheappInv.application.commands.DiscountStockCommand;
 import com.cheapp.cheappInv.application.commands.RestockCommand;
 import com.cheapp.cheappInv.domain.IdempotencyViolationException;
 import com.cheapp.cheappInv.domain.ProductBlockedException;
 import com.cheapp.cheappInv.domain.StockInsufficientException;
+import com.cheapp.cheappInv.domain.UnitCode;
 import com.cheapp.cheappInv.infra.persistence.OutboxEventRepository;
 import com.cheapp.cheappInv.infra.persistence.ProductRepository;
 import com.cheapp.cheappInv.infra.persistence.StockRepository;
@@ -32,6 +38,9 @@ class InventoryServiceIntegrationTest {
 
 	@Autowired
 	OutboxEventRepository outboxEventRepository;
+
+	@Autowired
+	RecipeService recipeService;
 
 	@Test
 	@Transactional
@@ -83,5 +92,28 @@ class InventoryServiceIntegrationTest {
 		assertThatThrownBy(() -> inventoryService.descontarStockPorItem(
 				new DiscountStockCommand(dupEventId, "corr-4", "SKU-4", "MAIN", 1, null)))
 				.isInstanceOf(IdempotencyViolationException.class);
+	}
+
+	@Test
+	@Transactional
+	void comanda_cerrada_discounts_stock_by_active_recipe_and_is_idempotent() {
+		inventoryService.ensureProductExists("ING-A");
+		inventoryService.reponerStock(new com.cheapp.cheappInv.application.commands.RestockCommand("evt-restock-a-" + UUID.randomUUID(), "corr-a", "ING-A", "MAIN", 10, null));
+
+		var recipe = recipeService.createRecipe(new CreateRecipeCommand("DISH-1", "corr-a"));
+		recipeService.addIngredient(new AddIngredientToRecipeCommand(recipe.getRecipeId(), "ING-A", 2, UnitCode.ML, "corr-a"));
+		recipeService.activate(new ActivateRecipeCommand(recipe.getRecipeId(), "corr-a"));
+
+		String comandaId = "cmd-" + UUID.randomUUID();
+		inventoryService.descontarStockPorReceta(new ConsumeComandaCommand("evt-comanda-" + UUID.randomUUID(), "corr-a", comandaId,
+				java.util.List.of(new ConsumeComandaCommand.ComandaDishLine("DISH-1", 3)), "MAIN"));
+
+		var p = productRepository.findBySku("ING-A").orElseThrow();
+		var s = stockRepository.findByProductIdAndWarehouseId(p.getId(), "MAIN").orElseThrow();
+		assertThat(s.getQuantity()).isEqualTo(4);
+
+		assertThatThrownBy(() -> inventoryService.descontarStockPorReceta(new ConsumeComandaCommand("evt-comanda-2-" + UUID.randomUUID(), "corr-a", comandaId,
+				java.util.List.of(new ConsumeComandaCommand.ComandaDishLine("DISH-1", 1)), "MAIN")))
+				.isInstanceOf(com.cheapp.cheappInv.domain.ComandaAlreadyProcessedException.class);
 	}
 }

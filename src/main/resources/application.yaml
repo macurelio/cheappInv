@@ -55,6 +55,8 @@ inventory:
     poll-interval: 2s
     batch-size: 50
   default-warehouse-id: MAIN
+  consumption:
+    window-days: 30
 
 springdoc:
   swagger-ui:

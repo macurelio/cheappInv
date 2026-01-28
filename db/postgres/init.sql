@@ -118,6 +118,45 @@ CREATE TABLE IF NOT EXISTS outbox_events (
     CONSTRAINT uk_outbox_event_id UNIQUE (event_id)
 );
 
+-- recipes
+CREATE TABLE IF NOT EXISTS recipes (
+    id             BIGSERIAL PRIMARY KEY,
+    recipe_id      TEXT NOT NULL,
+    dish_sku       TEXT NOT NULL,
+    version_number INTEGER NOT NULL,
+    status         TEXT NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL,
+    version        BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT uk_recipes_recipe_id UNIQUE (recipe_id)
+);
+
+CREATE TABLE IF NOT EXISTS recipe_ingredients (
+    id             BIGSERIAL PRIMARY KEY,
+    recipe_id      BIGINT NOT NULL,
+    ingredient_sku TEXT NOT NULL,
+    quantity       BIGINT NOT NULL,
+    unit_code      TEXT NULL,
+    CONSTRAINT fk_recipe_ingredients_recipe FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE,
+    CONSTRAINT uk_recipe_ingredient UNIQUE (recipe_id, ingredient_sku)
+);
+
+-- processed_comandas (idempotencia de negocio)
+CREATE TABLE IF NOT EXISTS processed_comandas (
+    id           BIGSERIAL PRIMARY KEY,
+    comanda_id   TEXT NOT NULL,
+    processed_at TIMESTAMPTZ NOT NULL,
+    CONSTRAINT uk_processed_comanda_id UNIQUE (comanda_id)
+);
+
+-- historical_consumption
+CREATE TABLE IF NOT EXISTS historical_consumption (
+    id          BIGSERIAL PRIMARY KEY,
+    product_sku TEXT NOT NULL,
+    quantity    BIGINT NOT NULL,
+    comanda_id  TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL
+);
+
 -- ==========================================================
 -- 3) Índices
 -- ==========================================================
@@ -138,6 +177,11 @@ CREATE INDEX IF NOT EXISTS idx_inbox_received_at ON inbox_events (received_at);
 
 -- outbox_events
 CREATE INDEX IF NOT EXISTS idx_outbox_status_created ON outbox_events (published, created_at);
+
+-- recipes
+CREATE INDEX IF NOT EXISTS idx_recipes_dish_sku ON recipes (dish_sku);
+CREATE INDEX IF NOT EXISTS idx_recipes_dish_status ON recipes (dish_sku, status);
+CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_recipe ON recipe_ingredients (recipe_id);
 
 -- ==========================================================
 -- 4) Checks (opcionales)
@@ -162,5 +206,14 @@ BEGIN
     ) THEN
         ALTER TABLE inventory_movements
             ADD CONSTRAINT chk_movements_type CHECK (type IN ('DEBIT','CREDIT'));
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_recipes_status'
+    ) THEN
+        ALTER TABLE recipes
+            ADD CONSTRAINT chk_recipes_status CHECK (status IN ('DRAFT','ACTIVE','ARCHIVED'));
     END IF;
 END $$;
