@@ -204,7 +204,7 @@ Efecto:
 - `GET /api/products/{sku}`
 - Respuesta:
   - `200 OK` con `{ "sku": "...", "status": "ACTIVE|BLOCKED" }`
-  - Si no existe, actualmente devuelve `null` (Spring lo serializa como respuesta vacía). En un API productivo sería preferible `404`.
+  - Si no existe: `404 Not Found` con `PRODUCT_NOT_FOUND`.
 
 ### 6.3 Consulta de stock
 
@@ -214,9 +214,60 @@ Efecto:
 Respuesta:
 - `{ "sku": "SKU-1", "warehouseId": "MAIN", "quantity": 10 }`
 - Si el producto existe pero no hay stock, devuelve `quantity=0`.
-- Si el producto no existe, actualmente devuelve `null`.
+- Si el producto no existe: `404 Not Found` con `PRODUCT_NOT_FOUND`.
 
-### 6.4 Simulación de consumo de eventos (opcional)
+### 6.4 Categorías
+
+#### Listar categorías
+- `GET /api/categories`
+
+Respuesta (ejemplo):
+```json
+[{"code":"BEBIDAS","name":"Bebidas","parentCode":null}]
+```
+
+#### Listar productos por categoría
+- `GET /api/categories/{code}/products?warehouseId=MAIN&inStockOnly=false&page=0&size=20`
+
+Notas:
+- El resultado es paginado.
+- `inStockOnly=true` filtra por stock en `warehouseId`.
+
+### 6.5 Recetas (BOM)
+
+Estos endpoints permiten modelar una receta por plato y luego consumir stock por ingredientes cuando llega una `ComandaCerrada`.
+
+#### Crear receta (DRAFT)
+- `POST /api/recipes`
+- Body:
+```json
+{ "dishSku": "DISH-1" }
+```
+
+#### Agregar ingrediente
+- `POST /api/recipes/{recipeId}/ingredients`
+- Body:
+```json
+{ "ingredientSku": "SKU-ING-1", "quantity": 2, "unitCode": "UNIT" }
+```
+
+#### Activar receta
+- `POST /api/recipes/{recipeId}/activate`
+
+#### Versionar receta activa
+- `POST /api/recipes/{recipeId}/version`
+
+### 6.6 Consumo histórico (solo lectura)
+
+#### Consumo promedio por producto
+- `GET /api/consumption/average?sku=SKU-1&windowDays=30`
+
+Respuesta:
+```json
+{ "sku": "SKU-1", "windowDays": 30, "totalConsumed": 120, "averagePerDay": 4.0 }
+```
+
+### 6.7 Simulación de consumo de eventos (opcional)
 
 Estos endpoints simulan lo que en producción sería un consumidor de mensajería.
 
@@ -259,6 +310,30 @@ Body (`PedidoProveedorRecibidoEvent`):
 
 Respuesta: **202 Accepted**
 
+#### Comanda cerrada (consumo por recetas)
+- `POST /api/events/in/comanda-cerrada`
+
+Body (`ComandaCerradaEvent`):
+```json
+{
+  "eventId": "evt-200",
+  "correlationId": "corr-200",
+  "comandaId": "CMD-1000",
+  "warehouseId": "MAIN",
+  "dishes": [
+    { "dishSku": "DISH-1", "quantity": 2 }
+  ]
+}
+```
+
+Efecto:
+- Resuelve receta activa por `dishSku`.
+- Descuenta stock por ingrediente *cantidadIngrediente × cantidadPlatos*.
+- Registra consumo histórico.
+- Idempotencia: si llega una comanda ya procesada, responde **202** con `DUPLICATE_EVENT`.
+
+Respuesta: **202 Accepted**
+
 ## 7) Errores y códigos HTTP
 
 Manejados en `RestExceptionHandler`:
@@ -295,6 +370,14 @@ Formato de error:
 1. Crear/seedear un producto con múltiples categorías (el `seed.sql` ya lo hace en Postgres).
 2. `GET /api/products?warehouseId=MAIN&page=0&size=20`
 3. Resultado esperado: **200** (no debe ocurrir `Duplicate key ...`).
+
+### Flujo D: recetas + cierre de comanda
+1. Crear receta DRAFT: `POST /api/recipes`.
+2. Agregar ingredientes: `POST /api/recipes/{recipeId}/ingredients`.
+3. Activar receta: `POST /api/recipes/{recipeId}/activate`.
+4. Reponer stock de ingredientes: `POST /api/events/in/pedido-proveedor-recibido`.
+5. Enviar cierre de comanda: `POST /api/events/in/comanda-cerrada`.
+6. Consultar consumo: `GET /api/consumption/average?sku=SKU-ING-1&windowDays=30`.
 
 ## 9) Observabilidad
 
